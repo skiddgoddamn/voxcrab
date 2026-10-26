@@ -1,0 +1,10 @@
+import { build } from 'esbuild';
+import { copyFileSync, mkdirSync } from 'node:fs';
+mkdirSync('vendor', { recursive: true });
+await build({ entryPoints: ['vrm_entry.js'], bundle: true, minify: true, format: 'iife', outfile: 'vendor/vrm.bundle.js', legalComments: 'none' });
+copyFileSync('node_modules/pixi.js/dist/browser/pixi.min.js', 'vendor/pixi.min.js');
+copyFileSync('node_modules/pixi-live2d-display/dist/cubism4.min.js', 'vendor/cubism4.min.js');
+copyFileSync('node_modules/three/LICENSE', 'vendor/LICENSE.three.txt');
+copyFileSync('node_modules/@pixiv/three-vrm/LICENSE', 'vendor/LICENSE.three-vrm.txt');
+copyFileSync('node_modules/pixi.js/LICENSE', 'vendor/LICENSE.pixi.txt');
+copyFileSync('node_modules/pixi-live2d-display/LICENSE', 'vendor/LICENSE.pixi-live2d-display.txt');

@@ -1,0 +1,15 @@
+.venv/
+models/
+__pycache__/
+*.wav
+config.json
+*.log
+*.log.1
+engines/web/node_modules/
+vwd.log
+smoke.wav
+*.part
+dist/
+build/
+*.egg-info/
+.pytest_cache/

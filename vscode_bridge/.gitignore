@@ -1,0 +1,4 @@
+events.jsonl
+__pycache__/
+testproj/.claude/settings.json
+*.out

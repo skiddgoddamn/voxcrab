@@ -1,0 +1,19 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+numpy
+sounddevice
+pystray
+pillow
+keyboard
+requests
+vosk
+faster-whisper
+nvidia-cublas-cu12
+nvidia-cudnn-cu12
+torch
+silero-vad
+edge-tts
+soundfile
+scipy
+
+# optional: Live2D / VRM renderer (WebView2 host). The standard GIF/PNG character works without it.
+pywebview

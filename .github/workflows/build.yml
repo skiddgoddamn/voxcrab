@@ -1,0 +1,71 @@
+name: build
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12', cache: pip }
+      - name: Install (tests only; models are not needed)
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest numpy pillow requests scipy soundfile sounddevice pystray keyboard pywebview
+          pip install silero-vad vosk faster-whisper edge-tts torch --extra-index-url https://download.pytorch.org/whl/cpu
+      - name: Tests
+        run: python -m pytest tests_engines tests_settings tests_bridge -q
+
+  # Mac / Linux: only the pure-Python tests, no GUI. Not a supported platform yet, so failures do not block the release.
+  test-portable:
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix: { os: [ubuntu-latest, macos-latest] }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install pytest numpy pillow requests
+      - run: python -m pytest tests_engines/test_model_check.py tests_engines/test_library_profiles.py tests_engines/test_tts_normalize.py tests_engines/test_lipsync.py tests_engines/test_sprite_anchor.py tests_bridge/test_new_session.py tests_bridge/test_repeat.py -q
+
+  build-windows:
+    needs: test-windows
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    permissions: { contents: write }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12', cache: pip }
+      - name: Install runtime dependencies (CPU torch, no CUDA wheels)
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+          pip uninstall -y nvidia-cublas-cu12 nvidia-cudnn-cu12 || true
+          pip install pyinstaller
+      - name: Build
+        run: python -m PyInstaller --noconfirm voice-widget.spec
+      - name: Zip
+        shell: pwsh
+        run: Compress-Archive -Path dist/voice-widget -DestinationPath "voice-widget-${{ github.ref_name }}-windows-x64.zip"
+      - name: Installer (Inno Setup is preinstalled on windows-latest)
+        shell: pwsh
+        run: |
+          $env:VW_VERSION = "${{ github.ref_name }}".TrimStart('v')
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\voice-widget.iss
+          Rename-Item dist\voice-widget-setup.exe "voice-widget-${{ github.ref_name }}-setup.exe"
+        continue-on-error: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            voice-widget-${{ github.ref_name }}-windows-x64.zip
+            dist/voice-widget-${{ github.ref_name }}-setup.exe

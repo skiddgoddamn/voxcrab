@@ -1,0 +1,13 @@
+{
+  "name": "voice-widget-web-engines",
+  "private": true,
+  "description": "Build-time deps for the Live2D / VRM renderer page. Run `npm install && npm run build`; output goes to vendor/.",
+  "scripts": { "build": "node build.mjs" },
+  "devDependencies": {
+    "esbuild": "0.25.5",
+    "three": "0.180.0",
+    "@pixiv/three-vrm": "3.4.5",
+    "pixi.js": "6.5.10",
+    "pixi-live2d-display": "0.4.0"
+  }
+}
