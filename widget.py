@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 
 from bridge_voice import Bridge
-from dialog_state import is_repeat
+from dialog_state import BargeDetector, is_repeat
 from mascot import Mascot
 import characters, settings_apply, settings_store, wake
 from engines import lipsync
@@ -69,7 +69,7 @@ CONFIG = DATA / 'config.json'
 SR = 16000
 DEFAULTS = {
     'agent_ui_url': 'http://127.0.0.1:3737', 'hotkey': 'ctrl+alt+space',
-    'wake_word_enabled': True, 'wake_bargein': True,
+    'wake_word_enabled': True, 'wake_bargein': True, 'barge_in': True,
     'speak_mode': 'immediate',            # immediate | on_request
     'whisper_model': 'auto',              # auto = medium on GPU, small on CPU
     'tts_speaker': 'xenia',               # silero: aidar baya kseniya xenia eugene; edge-tts: ru-RU-SvetlanaNeural ru-RU-DmitryNeural
@@ -219,6 +219,7 @@ class Widget:
         self.msgs = queue.Queue(); self.audio = queue.Queue()
         self.speaking = threading.Event(); self.stop_speak = threading.Event(); self.recording = False
         self.cancel_rec = False
+        self.barge_det = BargeDetector(); self.barge_hold = False; self.cur_item = None; self.redo = None
         self.ptt = False; self.followup = False; self.last_voice = 0.0; self.quit = False
         self.ring = collections.deque(maxlen=48)  # ~1.5 s pre-roll
         self.working = False; self.work_until = 0.0; self.ui = None; self.followup_rec = False
@@ -306,8 +307,13 @@ class Widget:
     def speaker_loop(self):
         import sounddevice as sd
         while not self.quit:
+            while self.barge_hold and not self.quit: time.sleep(0.05)      # the user is answering: the next question waits until the answer is handled
+            if self.redo:                    # recognition failed: ask the same question again, before the rest of the queue
+                item, self.redo = self.redo, None
+                with self.msgs.mutex: self.msgs.queue.appendleft(item); self.msgs.not_empty.notify()
             try: text, ask, extra = self.msgs.get(timeout=0.3)
             except queue.Empty: continue
+            self.cur_item = (text, ask, extra)
             self.stop_speak.clear(); self.show_message(text, ask, extra)
             for part in re.split(r'(?<=[.!?])\s+', text):
                 part = part.strip()
@@ -326,6 +332,7 @@ class Widget:
                             out.write(ch.reshape(-1, 1))
                 except Exception as e: log('play error', e, flush=True)
                 self.ui.set_mouth(None); self.speaking.clear()
+            if not self.barge_hold: self.cur_item = None
             self.set_state('слушаю')
             self.ui.release(60 if ask else self.cfg['bubble_hide_sec'])
             if ask and not self.stop_speak.is_set() and self.msgs.empty():
@@ -364,10 +371,10 @@ class Widget:
         self.stt_unclear = self.stt.last_logprob < self.cfg['confirm_logprob'] or words < 2 or letters < 0.6 * max(1, len(text.replace(' ', '')))
         low = re.sub(r'^(эй\s+)?(' + '|'.join(WAKE_WORDS) + r')\s*', '', low).strip()
         if not low:  # only the wake word: wait for the command without it
-            self.followup = True; return
-        if FLUSH.match(low): return self.flush()
-        if is_repeat(low): return self.repeat()
-        self.answer_or_send(text)
+            self.followup = True; return bool(text.strip())
+        if FLUSH.match(low): self.flush(); return True
+        if is_repeat(low): self.repeat(); return True
+        self.answer_or_send(text); return True
 
     def send(self, text):
         import requests
@@ -460,6 +467,15 @@ class Widget:
                 if p > 0.5 and not in_speech: in_speech, sp_t0 = True, time.time(); log('[vad] speech start p=%.2f rms=%.0f' % (p, rms))
                 elif p < 0.35 and in_speech and time.time() - self.last_voice > 0.5: in_speech = False; log('[vad] speech end %.1fs' % (time.time() - sp_t0))
                 if not self.speaking.is_set() and p > 0.5: self.last_voice = time.time()
+                if self.cfg.get('barge_in', True) and self.barge_det.feed(p, rms, self.speaking.is_set(), time.time()):
+                    log('[barge] user speech over TTS rms=%.0f' % rms); self.barge_hold = True; self.barge()
+                    pre = list(self.ring); self.ring.clear(); self.barge_det.reset(); ok = False
+                    try:
+                        a = self.record(preroll=pre)
+                        log('[barge] recorded', None if a is None else '%.1fs' % (len(a) / SR))
+                        ok = a is not None and bool(self.handle(a, False))
+                    finally: self.finish_barge(ok); self.set_state('слушаю')
+                    continue
                 if self.ptt:
                     log('[hotkey] push-to-talk start'); self.barge(); a = self.record(ptt=True)
                     log('[hotkey] push-to-talk end, audio', None if a is None else '%.1fs' % (len(a) / SR))
@@ -495,6 +511,11 @@ class Widget:
         if self.recording and not self.ptt: self.cancel_rec = True
         if self.bridge: self.bridge.dlg.reset()
         self.ui.release(0); self.set_state('слушаю')
+
+    def finish_barge(self, answered):
+        """The user interrupted a question and has been handled. Not understood -> the same question is asked again before the rest of the queue."""
+        if not answered and self.cur_item and self.cur_item[1]: self.redo = self.cur_item; log('[barge] not understood, asking again')
+        self.cur_item = None; self.barge_hold = False
 
     def barge(self):
         if self.speaking.is_set(): self.stop_speak.set(); time.sleep(0.15)

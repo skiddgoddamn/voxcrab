@@ -72,7 +72,7 @@ def save_config(path, cfg):
 # ---------------------------------------------------------------- validation of what the settings window sends
 MODS = {'ctrl', 'alt', 'shift', 'windows', 'win'}
 SPEC = {  # key -> (kind, arg...)
-    'wake_word_enabled': ('bool',), 'wake_bargein': ('bool',), 'wake_word': ('str',), 'wake_extra_variants': ('strlist',),
+    'wake_word_enabled': ('bool',), 'wake_bargein': ('bool',), 'barge_in': ('bool',), 'wake_word': ('str',), 'wake_extra_variants': ('strlist',),
     'wake_mode': ('enum', ('fast', 'strict')), 'wake_min_conf': ('num', 0.0, 1.0),
     'character': ('str',), 'mascot_scale': ('int', 1, 12), 'mascot_opacity': ('num', 0.3, 1.0), 'mascot_anim_speed': ('num', 0.25, 3.0),
     'mascot_x': ('int?', -10000, 20000), 'mascot_y': ('int?', -10000, 20000), 'sleep_after_min': ('num', 0, 600), 'emotion_map': ('map',),

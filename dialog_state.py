@@ -34,6 +34,29 @@ def is_repeat(low: str) -> bool:
     return bool(_REPEAT.match(re.sub(r'[^\w\s]', ' ', low.lower()).strip()))
 
 
+class BargeDetector:
+    """Detects the USER talking over our own TTS. The microphone also hears the speakers, so VAD alone is not enough:
+    speech counts only when VAD is confident (vad_thr, higher than the normal 0.5), the level jumps above what the mic picked up
+    from our own playback (echo_ratio x a slow average of the level while we speak) and this lasts min_s seconds."""
+    def __init__(self, vad_thr=0.8, min_s=0.35, echo_ratio=1.8, floor=150.0, alpha=0.03):
+        self.vad_thr, self.min_s, self.echo_ratio, self.floor, self.alpha = vad_thr, min_s, echo_ratio, floor, alpha
+        self.base = None; self.t0 = None
+
+    def reset(self): self.base = None; self.t0 = None
+
+    def feed(self, p, rms, speaking, now):
+        """One mic frame -> True once, when the user has been talking over the playback long enough."""
+        if not speaking: self.reset(); return False
+        if self.base is None: self.base = rms
+        loud = p >= self.vad_thr and rms > self.echo_ratio * max(self.base, self.floor)
+        if loud:
+            if self.t0 is None: self.t0 = now
+            if now - self.t0 >= self.min_s: self.t0 = None; return True
+        else:
+            self.t0 = None; self.base += self.alpha * (rms - self.base)      # learn the echo level only from frames that are not the user
+        return False
+
+
 def is_question(t: str) -> bool:
     return str(t or '').rstrip().endswith('?')
 
