@@ -551,6 +551,12 @@ class Widget:
         base = self.cfg.get('meeting_dir') or str(Path.home() / 'Documents' / 'voxcrab' / 'meetings')
         return Path(base) / time.strftime('%Y-%m-%d_%H-%M-%S')
 
+    def open_meetings_folder(self):
+        root = Path(self.cfg.get('meeting_dir') or Path.home() / 'Documents' / 'voxcrab' / 'meetings')
+        root.mkdir(parents=True, exist_ok=True)
+        try: os.startfile(str(root))
+        except OSError as e: log('[meeting] open folder failed:', e)
+
     def toggle_meeting(self):
         if self.meeting: self.stop_meeting()
         else: self.start_meeting()
@@ -734,6 +740,7 @@ class Widget:
             pystray.MenuItem('Озвучивать по запросу', toggle_mode, checked=on_req),
             pystray.MenuItem('Запись встречи', lambda i, it: self.toggle_meeting(), checked=lambda i: self.meeting),
             pystray.MenuItem('Отправить расшифровку Клоду…', lambda i, it: self.send_transcript(), enabled=lambda i: bool(self.last_transcript)),
+            pystray.MenuItem('Папка с записями', lambda i, it: self.open_meetings_folder()),
             pystray.MenuItem('Не слушать', lambda i, it: self.toggle_mute(), checked=lambda i: self.muted),
             pystray.MenuItem('Слово «Клод»', toggle_wake, checked=lambda i: self.cfg['wake_word_enabled']),
             pystray.MenuItem(lambda i: 'Показать Клода' if self.ui.hidden else 'Скрыть Клода', toggle_win, default=True),
