@@ -148,7 +148,7 @@ class Mascot:
         self.emotion, self.t0, self.idle_since = 'idle', time.time(), time.time()
         self.transient_until = 0.0; self.override = None  # (emotion, until) while previewing
         self.anims, self.photos, self._last = {}, {}, None; self.look_override = {}
-        self.web = None; self.web_box = None; self.sprite_top = 0; self.host = None; self.web_key = None; self.web_emotion = None; self.engine_status = ('gif', '')  # (engine in use, why the model is not used)
+        self.muted = False; self.web = None; self.web_box = None; self.sprite_top = 0; self.host = None; self.web_key = None; self.web_emotion = None; self.engine_status = ('gif', '')  # (engine in use, why the model is not used)
         self.fs_hidden = False; self._fs_t = self._top_t = self._moved_t = self._place_t = 0.0; self._patrol = None; self._notified = None; self._dragging = False
         self.root = tk.Tk(); r = self.root
         r.overrideredirect(True); r.attributes('-topmost', True); r.attributes('-transparentcolor', KEY); r.configure(bg=KEY)
@@ -181,6 +181,8 @@ class Mascot:
     def release(self, delay): self.call(self._release_bubble, delay)
     def hide_bubble(self): self.call(self.bubble.hide)
     def toggle(self): self.call(self._set_hidden, not self.hidden)
+    def set_muted(self, on): self.call(self._set_muted, bool(on))
+    def _set_muted(self, on): self.muted = on; self._last = None
     def set_hidden(self, v): self.call(self._set_hidden, v)
     def stop(self): self.quit = True
 
@@ -201,6 +203,7 @@ class Mascot:
         e = characters.resolve_emotion(e); self.override = (e, time.time() + secs); self.t0 = time.time()
     def _current(self):
         now = time.time()
+        if getattr(self, 'muted', False): return 'sleep'            # "do not listen": the mascot sleeps
         if self.override:
             if now < self.override[1]: return self.override[0]
             self.override = None; self.t0 = now

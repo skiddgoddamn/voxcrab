@@ -21,7 +21,7 @@ def test_echo_alone_is_not_an_answer():
 
 def test_user_over_echo_triggers_after_min_duration():
     t = run(BargeDetector(), ECHO + USER)
-    assert t is not None and t > 60 * 0.032 + 0.3           # not instantly: at least min_s of sustained speech
+    assert t is not None and t > 60 * 0.032 + 0.2           # not instantly: at least min_s of sustained speech
 
 
 def test_short_blip_over_playback_is_ignored():

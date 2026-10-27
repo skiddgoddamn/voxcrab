@@ -19,7 +19,7 @@ STATE_RU = {'working': 'Работает (working)', 'awaiting_clarification': '
             'idle': 'Покой (idle)', 'listening': 'Слушаю (listening)', 'transcribing': 'Распознаю (transcribing)', 'thinking': 'Загрузка (thinking)',
             'speaking': 'Говорю (speaking)'}
 BG = '#dfe3ea'
-HOTKEY_ROWS = [('hotkey', 'Говорить (удерживать)'), ('toggle_hotkey', 'Показать / скрыть Клода'), ('settings_hotkey', 'Открыть настройки')]
+HOTKEY_ROWS = [('hotkey', 'Говорить (удерживать)'), ('toggle_hotkey', 'Показать / скрыть Клода'), ('settings_hotkey', 'Открыть настройки'), ('stop_hotkey', 'Замолчать сейчас'), ('mute_hotkey', 'Не слушать (вкл / выкл)')]
 LOOK_KEYS = ('character', 'mascot_scale', 'mascot_opacity', 'mascot_anim_speed', 'model_scale', 'window_mode')
 _KEYSYM = {'space': 'space', 'Return': 'enter', 'Tab': 'tab', 'BackSpace': 'backspace', 'Delete': 'delete', 'Insert': 'insert', 'Home': 'home', 'End': 'end',
            'Prior': 'page up', 'Next': 'page down', 'Left': 'left', 'Right': 'right', 'Up': 'up', 'Down': 'down'}
@@ -202,6 +202,7 @@ class SettingsWindow:
             ttk.Radiobutton(mf, text=t, value=val, variable=mode).pack(anchor='w')
         self.row(f, 4, 'Режим срабатывания', mf)
         self.row(f, 5, 'Мин. уверенность (строго)', self.scale(f, 'wake_min_conf', 0.0, 1.0, '%.2f', 0.05))
+        ttk.Checkbutton(f, text='Не слушать, когда микрофон занят звонком Discord', variable=self.var('mute_on_call', 'bool', False)).grid(row=20, column=0, columnspan=2, sticky='w', pady=2)
         ttk.Checkbutton(f, text='Слово прерывает речь ассистента (лучше в наушниках)', variable=self.var('wake_bargein', 'bool', True)).grid(row=6, column=0, columnspan=2, sticky='w', pady=4)
         ttk.Separator(f).grid(row=7, column=0, columnspan=2, sticky='we', pady=8)
         ttk.Label(f, text='Проверка: нажмите кнопку и через полсекунды скажите слово (запись 3 с).').grid(row=8, column=0, columnspan=2, sticky='w')
@@ -521,6 +522,7 @@ class SettingsWindow:
     def fill(self, cfg):
         g = lambda k, d=None: cfg.get(k, d)
         for k in ('wake_word_enabled', 'wake_bargein', 'ask_more_after_done', 'trivial_direct'): self.v[k].set(bool(g(k, True)))
+        self.v['mute_on_call'].set(bool(g('mute_on_call', False)))
         self.v['wake_word'].set(g('wake_word', 'клод')); self.v['wake_extra_variants'].set(', '.join(g('wake_extra_variants', []) or []))
         self.v['wake_mode'].set(g('wake_mode', 'fast')); self.v['wake_min_conf'].set(float(g('wake_min_conf', 0.5)))
         for k, d in (('mascot_scale', 5), ('mascot_opacity', 1.0), ('mascot_anim_speed', 1.0), ('tts_rate', 1.0)): self.v[k].set(float(g(k, d)))
@@ -538,7 +540,7 @@ class SettingsWindow:
 
     def collect(self):
         v = lambda k: self.v[k].get()
-        ch = {k: v(k) for k in ('wake_word_enabled', 'wake_bargein', 'ask_more_after_done', 'trivial_direct', 'wake_word', 'wake_mode', 'speak_mode', 'confirm_mode',
+        ch = {k: v(k) for k in ('wake_word_enabled', 'wake_bargein', 'mute_on_call', 'ask_more_after_done', 'trivial_direct', 'wake_word', 'wake_mode', 'speak_mode', 'confirm_mode',
                                 'new_session_model', 'default_project_dir', 'tts_speaker')}
         ch['wake_extra_variants'] = v('wake_extra_variants'); ch['wake_min_conf'] = v('wake_min_conf')
         ch['character'] = self.char_id(); ch.update(self.eng.collect())

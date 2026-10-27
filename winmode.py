@@ -62,3 +62,42 @@ def patrol_step(x, target, dt, speed=40.0):
     d = target - x
     step = speed * dt
     return target if abs(d) <= step else x + (step if d > 0 else -step)
+
+
+# ---- is another app using the microphone? (documented Windows privacy-consent store, read only; no hooks, no injection)
+MIC_STORE = r'Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone'
+
+
+def mic_users(entries, names=('discord',)):
+    """entries: [(registry subkey name, LastUsedTimeStart, LastUsedTimeStop)]. An app uses the mic right now when Start > 0 and Stop == 0.
+    -> lower-case subkey names that contain one of `names` and are in use."""
+    out = []
+    for key, start, stop in entries:
+        low = str(key).lower()
+        if start and not stop and any(n in low for n in names): out.append(low)
+    return out
+
+
+def read_mic_entries():
+    """All apps in the consent store -> [(name, start, stop)]. [] when not on Windows or the key is missing."""
+    try: import winreg
+    except ImportError: return []
+    out = []
+    for sub in ('NonPackaged', ''):
+        try: root = winreg.OpenKey(winreg.HKEY_CURRENT_USER, MIC_STORE + (chr(92) + sub if sub else ''))
+        except OSError: continue
+        with root:
+            i = 0
+            while True:
+                try: name = winreg.EnumKey(root, i)
+                except OSError: break
+                i += 1
+                if name == 'NonPackaged': continue
+                try:
+                    with winreg.OpenKey(root, name) as k:
+                        out.append((name, winreg.QueryValueEx(k, 'LastUsedTimeStart')[0], winreg.QueryValueEx(k, 'LastUsedTimeStop')[0]))
+                except OSError: continue
+    return out
+
+
+def mic_busy_by(names=('discord',)): return bool(mic_users(read_mic_entries(), names))

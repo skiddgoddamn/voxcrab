@@ -10,7 +10,7 @@ import numpy as np
 from bridge_voice import Bridge
 from dialog_state import BargeDetector, is_repeat
 from mascot import Mascot
-import characters, settings_apply, settings_store, wake
+import characters, settings_apply, settings_store, wake, winmode
 from engines import lipsync
 import tts_normalize
 
@@ -98,6 +98,8 @@ DECOYS = ['алло', 'алё', 'привет', 'да', 'нет', 'ну', 'та�
           'код', 'клад', 'клуб', 'плод', 'вход', 'ход', 'холод', 'голод', 'коль', 'клен', 'глод', 'клавиатура', 'кот', 'клип', 'класс', 'слово', 'можно', 'нужно']
 SILERO_VOICES = ['aidar', 'baya', 'kseniya', 'xenia', 'eugene']
 EDGE_VOICES = ['ru-RU-SvetlanaNeural', 'ru-RU-DmitryNeural']
+STOPCMD = re.compile(r'^(стоп|стой|хватит|замолчи|замолчите|тихо|помолчи|достаточно|заткнись)( пожалуйста| уже| сейчас| болтать)*$')
+RESUMECMD = re.compile(r'^(продолжай|продолжи|продолжайте|дальше|давай дальше|читай дальше|говори дальше)( пожалуйста)*$')
 FLUSH = re.compile(r'^(что там|что нового|что новенького|есть новости|рассказывай)')
 
 
@@ -220,6 +222,7 @@ class Widget:
         self.speaking = threading.Event(); self.stop_speak = threading.Event(); self.recording = False
         self.cancel_rec = False
         self.barge_det = BargeDetector(); self.barge_hold = False; self.cur_item = None; self.redo = None
+        self.muted = False; self.auto_muted = False; self.paused = False; self._mic_chk = 0.0
         self.ptt = False; self.followup = False; self.last_voice = 0.0; self.quit = False
         self.ring = collections.deque(maxlen=48)  # ~1.5 s pre-roll
         self.working = False; self.work_until = 0.0; self.ui = None; self.followup_rec = False
@@ -307,7 +310,7 @@ class Widget:
     def speaker_loop(self):
         import sounddevice as sd
         while not self.quit:
-            while self.barge_hold and not self.quit: time.sleep(0.05)      # the user is answering: the next question waits until the answer is handled
+            while (self.barge_hold or self.paused) and not self.quit: time.sleep(0.05)      # the user is answering: the next question waits until the answer is handled
             if self.redo:                    # recognition failed: ask the same question again, before the rest of the queue
                 item, self.redo = self.redo, None
                 with self.msgs.mutex: self.msgs.queue.appendleft(item); self.msgs.not_empty.notify()
@@ -335,7 +338,7 @@ class Widget:
             if not self.barge_hold: self.cur_item = None
             self.set_state('слушаю')
             self.ui.release(60 if ask else self.cfg['bubble_hide_sec'])
-            if ask and not self.stop_speak.is_set() and self.msgs.empty():
+            if ask and not self.stop_speak.is_set() and self.msgs.empty() and not self.paused and not self.muted:
                 time.sleep(0.3); self.followup = True  # open the mic for the answer, no wake word needed
 
     # ---- listening
@@ -372,6 +375,8 @@ class Widget:
         low = re.sub(r'^(эй\s+)?(' + '|'.join(WAKE_WORDS) + r')\s*', '', low).strip()
         if not low:  # only the wake word: wait for the command without it
             self.followup = True; return bool(text.strip())
+        if STOPCMD.match(low): self.pause_speech(); return True
+        if RESUMECMD.match(low): self.resume_speech(); return True
         if FLUSH.match(low): self.flush(); return True
         if is_repeat(low): self.repeat(); return True
         self.answer_or_send(text); return True
@@ -437,6 +442,7 @@ class Widget:
 
     def listen_loop(self):
         while not self.quit:
+            while self.muted and not self.quit: self.check_auto_mute(); time.sleep(0.25)       # no input stream at all while muted
             try: self.listen_once()
             except Exception:
                 import traceback; log('listen_loop error, retry in 3s', traceback.format_exc()); time.sleep(3)
@@ -453,7 +459,8 @@ class Widget:
         lvl_max, lvl_sum, lvl_n, lvl_t, in_speech, sp_t0, last_part = 0.0, 0.0, 0, time.time(), False, 0.0, ''
         with sd.InputStream(samplerate=SR, channels=1, dtype='int16', blocksize=512, device=dev, callback=cb):
             self.set_state('слушаю')
-            while not self.quit and not self.mic_changed:
+            while not self.quit and not self.mic_changed and not self.muted:
+                self.check_auto_mute()
                 f = self.frame()
                 if f is None:
                     if time.time() - lvl_t > 5: log('[mic] NO AUDIO FRAMES for 5s'); lvl_t = time.time()
@@ -503,7 +510,10 @@ class Widget:
                         log('[wake] recorded', None if a is None else '%.1fs' % (len(a) / SR))
                         if a is not None: self.handle(a, True)
                         else: self.set_state('слушаю')
-        log('[mic] stream closed, restarting' if self.mic_changed else '[mic] listen loop ended')
+        if self.muted:
+            while not self.audio.empty(): self.audio.get_nowait()
+            self.ring.clear(); self.rec.reset() if hasattr(self, 'rec') and self.rec else None
+        log('[mic] stream closed, restarting' if self.mic_changed else '[mic] closed (muted)' if self.muted else '[mic] listen loop ended')
 
     def stop_all(self):
         # stop hotkey: hush, close the follow-up mic, drop pending questions
@@ -511,6 +521,40 @@ class Widget:
         if self.recording and not self.ptt: self.cancel_rec = True
         if self.bridge: self.bridge.dlg.reset()
         self.ui.release(0); self.set_state('слушаю')
+
+    def pause_speech(self):
+        """Voice 'стоп' / 'хватит' / 'замолчи' / 'тихо': hush at once. The interrupted message and the rest of the queue are KEPT; 'продолжай' / 'дальше' resumes."""
+        log('[stop] voice command: speech paused, queue kept (%d)' % self.msgs.qsize())
+        self.paused = True; self.stop_speak.set(); self.followup = False
+        if self.cur_item and not self.redo: self.redo = self.cur_item
+        self.ui.release(0); self.set_state('слушаю')
+
+    def resume_speech(self):
+        if not self.paused and not self.redo and self.msgs.empty(): self.msgs.put(('Больше ничего нет.', False, {})); return
+        log('[stop] resume'); self.paused = False
+
+    # ---- do not listen (microphone stream is closed, nothing is captured)
+    def set_muted(self, on, auto=False):
+        if on == self.muted: return
+        self.muted = on; self.auto_muted = bool(on and auto)
+        log('[mute]', 'ON' if on else 'off', '(auto: Discord uses the microphone)' if auto else '')
+        self.followup = False; self.ptt = False
+        if on and self.recording: self.cancel_rec = True
+        try: self.ui.set_muted(on)
+        except Exception as e: log('mute ui error', e)
+        try: self.icon.title = 'Голос Claude: не слушаю' if on else 'Голос Claude'
+        except Exception: pass
+        self.say_event('Не слушаю.' if on else 'Слушаю.', False, {})
+
+    def toggle_mute(self): self.set_muted(not self.muted)
+
+    def check_auto_mute(self):
+        if not self.cfg.get('mute_on_call') or time.time() - self._mic_chk < 3: return
+        self._mic_chk = time.time()
+        try: busy = winmode.mic_busy_by(('discord',))
+        except Exception: return
+        if busy and not self.muted: self.set_muted(True, auto=True)
+        elif not busy and self.muted and self.auto_muted: self.set_muted(False)
 
     def finish_barge(self, answered):
         """The user interrupted a question and has been handled. Not understood -> the same question is asked again before the rest of the queue."""
@@ -543,10 +587,11 @@ class Widget:
         hk = self.cfg['hotkey']
         def press():
             log('[hotkey] pressed', hk)
-            if not self.ptt: self.ptt = True
+            if not self.ptt and not self.muted: self.ptt = True
         self._hk.append(keyboard.add_hotkey(hk, press))
         if self.cfg['toggle_hotkey']: self._hk.append(keyboard.add_hotkey(self.cfg['toggle_hotkey'], lambda: (log('[hotkey] toggle'), self.ui.toggle())))
         if self.cfg.get('stop_hotkey'): self._hk.append(keyboard.add_hotkey(self.cfg['stop_hotkey'], self.stop_all))
+        if self.cfg.get('mute_hotkey'): self._hk.append(keyboard.add_hotkey(self.cfg['mute_hotkey'], lambda: (log('[hotkey] mute toggle'), self.toggle_mute())))
         if self.cfg.get('settings_hotkey'): self._hk.append(keyboard.add_hotkey(self.cfg['settings_hotkey'], lambda: self.ui.open_settings()))
         self._hk.append(keyboard.on_release_key(hk.split('+')[-1], lambda e: setattr(self, 'ptt', False)))
 
@@ -608,6 +653,7 @@ class Widget:
         def quit_(icon, item): self.exit()
         menu = pystray.Menu(
             pystray.MenuItem('Озвучивать по запросу', toggle_mode, checked=on_req),
+            pystray.MenuItem('Не слушать', lambda i, it: self.toggle_mute(), checked=lambda i: self.muted),
             pystray.MenuItem('Слово «Клод»', toggle_wake, checked=lambda i: self.cfg['wake_word_enabled']),
             pystray.MenuItem(lambda i: 'Показать Клода' if self.ui.hidden else 'Скрыть Клода', toggle_win, default=True),
             pystray.MenuItem('Голос', pystray.Menu(*[voice_item(v) for v in SILERO_VOICES + EDGE_VOICES])),
