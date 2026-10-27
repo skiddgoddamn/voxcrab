@@ -19,7 +19,7 @@ STATE_RU = {'working': 'Работает (working)', 'awaiting_clarification': '
             'idle': 'Покой (idle)', 'listening': 'Слушаю (listening)', 'transcribing': 'Распознаю (transcribing)', 'thinking': 'Загрузка (thinking)',
             'speaking': 'Говорю (speaking)'}
 BG = '#dfe3ea'
-HOTKEY_ROWS = [('hotkey', 'Говорить (удерживать)'), ('toggle_hotkey', 'Показать / скрыть Клода'), ('settings_hotkey', 'Открыть настройки'), ('stop_hotkey', 'Замолчать сейчас'), ('mute_hotkey', 'Не слушать (вкл / выкл)')]
+HOTKEY_ROWS = [('hotkey', 'Говорить (удерживать)'), ('toggle_hotkey', 'Показать / скрыть Клода'), ('settings_hotkey', 'Открыть настройки'), ('stop_hotkey', 'Замолчать сейчас'), ('mute_hotkey', 'Не слушать (вкл / выкл)'), ('meeting_hotkey', 'Запись встречи (вкл / выкл)')]
 LOOK_KEYS = ('character', 'mascot_scale', 'mascot_opacity', 'mascot_anim_speed', 'model_scale', 'window_mode')
 _KEYSYM = {'space': 'space', 'Return': 'enter', 'Tab': 'tab', 'BackSpace': 'backspace', 'Delete': 'delete', 'Insert': 'insert', 'Home': 'home', 'End': 'end',
            'Prior': 'page up', 'Next': 'page down', 'Left': 'left', 'Right': 'right', 'Up': 'up', 'Down': 'down'}

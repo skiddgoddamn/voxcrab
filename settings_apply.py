@@ -6,7 +6,7 @@ import settings_store
 import wake
 
 WAKE_KEYS = {'wake_word', 'wake_extra_variants', 'wake_mode', 'wake_min_conf'}
-HOTKEY_KEYS = {'hotkey', 'toggle_hotkey', 'settings_hotkey', 'stop_hotkey', 'mute_hotkey'}
+HOTKEY_KEYS = {'hotkey', 'toggle_hotkey', 'settings_hotkey', 'stop_hotkey', 'mute_hotkey', 'meeting_hotkey'}
 LOOK_KEYS = {'character', 'mascot_scale', 'mascot_opacity', 'mascot_anim_speed', 'sleep_after_min', 'emotion_map',
             'model_scale', 'window_mode', 'pet_patrol', 'compat_mode', 'fullscreen_policy', 'anim_enabled', 'render_fps', 'live2d_core_path', 'click_through', 'prewarm_engine'}
 

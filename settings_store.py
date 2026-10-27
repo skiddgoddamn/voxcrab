@@ -16,6 +16,8 @@ NEW_DEFAULTS = {
     'settings_hotkey': 'ctrl+alt+s',
     'stop_hotkey': 'ctrl+alt+x',        # hush now: stop speech, drop the pending question
     'mute_hotkey': 'ctrl+alt+m',        # toggle "do not listen": the microphone stream is closed
+    'meeting_hotkey': 'ctrl+alt+r',     # toggle meeting recording (mic + PC audio -> local transcript)
+    'meeting_dir': '',                 # empty = Documents\voxcrab\meetings
     'mute_on_call': False,             # auto "do not listen" while Discord uses the microphone (Windows privacy consent store, read only)
     # characters and engines (Live2D / VRM are optional; the standard GIF/PNG character always works)
     'model_scale': 100,                # % of the 300x420 window used by Live2D / VRM models
@@ -34,7 +36,7 @@ NEW_DEFAULTS = {
 TYPES = {
     'wake_word': str, 'wake_extra_variants': list, 'wake_mode': str, 'wake_min_conf': (int, float),
     'character': str, 'mascot_opacity': (int, float), 'mascot_anim_speed': (int, float),
-    'sleep_after_min': (int, float), 'emotion_map': dict, 'settings_hotkey': str, 'stop_hotkey': str, 'mute_hotkey': str, 'mute_on_call': bool,
+    'sleep_after_min': (int, float), 'emotion_map': dict, 'settings_hotkey': str, 'stop_hotkey': str, 'mute_hotkey': str, 'mute_on_call': bool, 'meeting_hotkey': str, 'meeting_dir': str,
     'model_scale': (int, float), 'window_mode': str, 'pet_patrol': bool, 'compat_mode': str, 'fullscreen_policy': str, 'anim_enabled': bool,
     'render_fps': (int, float), 'live2d_core_path': str, 'click_through': bool, 'prewarm_engine': bool,
 }
@@ -80,7 +82,7 @@ SPEC = {  # key -> (kind, arg...)
     'character': ('str',), 'mascot_scale': ('int', 1, 12), 'mascot_opacity': ('num', 0.3, 1.0), 'mascot_anim_speed': ('num', 0.25, 3.0),
     'mascot_x': ('int?', -10000, 20000), 'mascot_y': ('int?', -10000, 20000), 'sleep_after_min': ('num', 0, 600), 'emotion_map': ('map',),
     'mic_device': ('str?',), 'speaker_device': ('str?',), 'tts_speaker': ('str',), 'tts_rate': ('num', 0.5, 2.0),
-    'hotkey': ('hotkey',), 'toggle_hotkey': ('hotkey?',), 'settings_hotkey': ('hotkey?',), 'stop_hotkey': ('hotkey?',), 'mute_hotkey': ('hotkey?',), 'mute_on_call': ('bool',),
+    'hotkey': ('hotkey',), 'toggle_hotkey': ('hotkey?',), 'settings_hotkey': ('hotkey?',), 'stop_hotkey': ('hotkey?',), 'mute_hotkey': ('hotkey?',), 'mute_on_call': ('bool',), 'meeting_hotkey': ('hotkey?',), 'meeting_dir': ('str',),
     'speak_mode': ('enum', ('immediate', 'on_request')), 'confirm_mode': ('enum', ('unclear', 'always', 'never')),
     'ask_more_after_done': ('bool',), 'trivial_direct': ('bool',), 'new_session_model': ('str',),
     'model_scale': ('int', 40, 200), 'window_mode': ('enum', ('normal', 'pet')), 'pet_patrol': ('bool',),

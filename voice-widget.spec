@@ -4,7 +4,7 @@
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 datas, binaries, hidden = [], [], []
-for pkg in ('faster_whisper', 'ctranslate2', 'silero_vad', 'vosk', 'webview', 'pystray', 'edge_tts', 'tokenizers', 'onnxruntime'):
+for pkg in ('faster_whisper', 'ctranslate2', 'silero_vad', 'vosk', 'webview', 'pystray', 'edge_tts', 'tokenizers', 'onnxruntime', 'pyaudiowpatch'):
     d, b, h = collect_all(pkg); datas += d; binaries += b; hidden += h
 hidden += collect_submodules('engines') + collect_submodules('vscode_bridge') + ['pystray._win32', 'PIL._tkinter_finder', 'sounddevice', 'soundfile', 'keyboard']
 

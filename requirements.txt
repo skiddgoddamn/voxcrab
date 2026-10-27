@@ -13,6 +13,7 @@ torch
 silero-vad
 edge-tts
 soundfile
+pyaudiowpatch  # meeting recording: WASAPI loopback (Windows)
 scipy
 
 # optional: Live2D / VRM renderer (WebView2 host). The standard GIF/PNG character works without it.

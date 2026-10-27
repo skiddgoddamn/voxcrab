@@ -33,6 +33,6 @@ Everything below keeps its own license.
 
 ## Python dependencies (installed with pip, not vendored)
 
-numpy, sounddevice, pystray, pillow, keyboard, requests, scipy, soundfile (BSD/MIT/LGPL-style permissive), vosk (Apache-2.0),
+numpy, sounddevice, PyAudioWPatch (MIT, meeting recording), pystray, pillow, keyboard, requests, scipy, soundfile (BSD/MIT/LGPL-style permissive), vosk (Apache-2.0),
 faster-whisper (MIT), torch (BSD-3), silero-vad (MIT), pywebview (BSD-3), nvidia-cublas-cu12 / nvidia-cudnn-cu12 (NVIDIA proprietary license, optional GPU speed-up),
 edge-tts (LGPL-3.0; it talks to Microsoft's online read-aloud service, which is not an official API; used only as a fallback voice).

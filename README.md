@@ -87,6 +87,13 @@ Claude Code hooks call `python vscode_bridge/hook.py` (standard library only), s
 
 The wake word and recognition language are Russian today; the dialog grammar lives in `dialog_state.py` and `bridge_voice.py`.
 
+## Meeting recording
+
+`Ctrl+Alt+R` (tray, right-click menu) toggles **meeting recording**: your microphone and the PC audio (WASAPI loopback of the default output, via PyAudioWPatch, no virtual drivers) are saved as two tracks (`mic.wav`, `others.wav`) plus `mixed.flac` in `Documents\voxcrab\meetings\<date-time>\` (folder is configurable). While recording the wake word and all commands are off, nothing is sent to any session and spoken messages wait in the queue; the crab shows a blinking red dot.
+On stop the local Whisper transcribes in chunks with progress and writes `transcript.md` / `transcript.txt` with timestamps and speakers by source ("Я" = microphone, "Собеседники" = PC audio), opens it and copies the text to the clipboard. The text goes to Claude only if you click "Отправить расшифровку Клоду…" in the tray menu. It does not start while "Не слушать" is on.
+
+> **Privacy:** record a call or a meeting only with the consent of everybody who can be heard. Recordings never leave your machine unless you send them yourself.
+
 ## Characters & engines
 
 | Kind | What | Where |

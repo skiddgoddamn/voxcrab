@@ -148,7 +148,7 @@ class Mascot:
         self.emotion, self.t0, self.idle_since = 'idle', time.time(), time.time()
         self.transient_until = 0.0; self.override = None  # (emotion, until) while previewing
         self.anims, self.photos, self._last = {}, {}, None; self.look_override = {}
-        self.muted = False; self.web = None; self.web_box = None; self.sprite_top = 0; self.host = None; self.web_key = None; self.web_emotion = None; self.engine_status = ('gif', '')  # (engine in use, why the model is not used)
+        self.muted = False; self.recording = False; self.web = None; self.web_box = None; self.sprite_top = 0; self.host = None; self.web_key = None; self.web_emotion = None; self.engine_status = ('gif', '')  # (engine in use, why the model is not used)
         self.fs_hidden = False; self._fs_t = self._top_t = self._moved_t = self._place_t = 0.0; self._patrol = None; self._notified = None; self._dragging = False
         self.root = tk.Tk(); r = self.root
         r.overrideredirect(True); r.attributes('-topmost', True); r.attributes('-transparentcolor', KEY); r.configure(bg=KEY)
@@ -181,6 +181,12 @@ class Mascot:
     def release(self, delay): self.call(self._release_bubble, delay)
     def hide_bubble(self): self.call(self.bubble.hide)
     def toggle(self): self.call(self._set_hidden, not self.hidden)
+    def set_recording(self, on): self.call(self._set_recording, bool(on))
+    def _set_recording(self, on): self.recording = on; self._last = None
+    def copy_text(self, text): self.call(self._copy, text)
+    def _copy(self, text):
+        try: self.root.clipboard_clear(); self.root.clipboard_append(text); self.root.update()
+        except Exception as e: self.log('clipboard failed', e)
     def set_muted(self, on): self.call(self._set_muted, bool(on))
     def _set_muted(self, on): self.muted = on; self._last = None
     def set_hidden(self, v): self.call(self._set_hidden, v)
@@ -276,13 +282,18 @@ class Mascot:
     def _render(self):
         cur = self._current(); anim = self._anim(cur)
         i = anim.index((time.time() - self.t0) * float(self._lk('mascot_anim_speed', 1.0) or 1.0)) if self.cfg.get('anim_enabled', True) is not False else 0
-        key = (cur, i)
+        rec_on = bool(getattr(self, 'recording', False)) and int(time.time() * 1.5) % 2 == 0      # blinking red dot while a meeting is recorded
+        key = (cur, i, rec_on)
         if key == self._last: return
         self._last = key; self.sprite_top = characters.rendered_top(anim.frames[i], self.W, self.H, anim.grid)
         ph = self.photos.get(key)
         if ph is None:
             if len(self.photos) > 400: self.photos.clear()
-            ph = self.photos[key] = ImageTk.PhotoImage(characters.render(anim.frames[i], self.W, self.H, anim.grid))
+            img = characters.render(anim.frames[i], self.W, self.H, anim.grid)
+            if rec_on:
+                from PIL import ImageDraw
+                r = max(4, self.S + 1); ImageDraw.Draw(img).ellipse((self.W - 3 * r, r // 2, self.W - r, r // 2 + 2 * r), fill=(225, 30, 30), outline=(255, 255, 255))
+            ph = self.photos[key] = ImageTk.PhotoImage(img)
         self.label.config(image=ph)
 
     def _press(self, e): self.drag = (e.x_root - self.x, e.y_root - self.y, False)

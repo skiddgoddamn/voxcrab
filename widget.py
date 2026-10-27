@@ -12,7 +12,7 @@ from dialog_state import BargeDetector, is_repeat
 from mascot import Mascot
 import characters, settings_apply, settings_store, wake, winmode
 from engines import lipsync
-import tts_normalize
+import tts_normalize, meeting
 
 import paths
 HERE, DATA = paths.HERE, paths.DATA
@@ -158,9 +158,18 @@ class STT:
         except Exception:
             if name in ('medium', 'large-v3', 'large-v2', 'large-v3-turbo') and not gpu: name = 'small'
             self.model = WhisperModel(name, device='cpu', compute_type='int8', download_root=root); self.device = 'cpu'
-        self.name = name
+        self.name = name; self.lock = threading.Lock()      # the live commands and the long meeting transcript share one model
+
+    def segments(self, audio):
+        # float32 mono 16k -> [(start, end, text)] with a VAD filter (meeting transcript chunks)
+        with self.lock:
+            segs, _ = self.model.transcribe(audio, language='ru', beam_size=1, vad_filter=True, condition_on_previous_text=False)
+            return [(s.start, s.end, s.text.strip()) for s in segs if s.text.strip()]
 
     def __call__(self, audio):  # float32 mono 16k
+        with self.lock: return self._call(audio)
+
+    def _call(self, audio):
         segs, _ = self.model.transcribe(audio, language='ru', beam_size=1, vad_filter=False, condition_on_previous_text=False, initial_prompt='Клод, скажи.')
         segs = list(segs); self.last_logprob = sum(s.avg_logprob for s in segs) / len(segs) if segs else 0.0
         return ' '.join(s.text.strip() for s in segs).strip()
@@ -222,6 +231,7 @@ class Widget:
         self.speaking = threading.Event(); self.stop_speak = threading.Event(); self.recording = False
         self.cancel_rec = False
         self.barge_det = BargeDetector(); self.barge_hold = False; self.cur_item = None; self.redo = None
+        self.meeting = False; self.meeting_busy = False; self.meeting_rec = None; self.last_transcript = None
         self.muted = False; self.auto_muted = False; self.paused = False; self._mic_chk = 0.0
         self.ptt = False; self.followup = False; self.last_voice = 0.0; self.quit = False
         self.ring = collections.deque(maxlen=48)  # ~1.5 s pre-roll
@@ -261,6 +271,7 @@ class Widget:
         threading.Thread(target=self.answer_or_send, args=(label,), daemon=True).start()
 
     def answer_or_send(self, text):
+        if self.meeting: log('[meeting] input ignored while recording'); return
         if self.bridge and self.bridge.try_answer(text): return
         self.send(text)
 
@@ -285,6 +296,7 @@ class Widget:
     def say_event(self, text, ask=False, extra=None):
         ask = ask or str(text).rstrip().endswith('?')  # a spoken question always opens follow-up listening
         item = (text, ask, extra or {})
+        if self.meeting and not (extra or {}).get('meeting'): self.held.append(item); return      # nothing is spoken over a meeting; it waits in the queue
         if ask: self.last_ask = item
         self.last_said = item
         self.working = False
@@ -365,6 +377,7 @@ class Widget:
         return np.concatenate(frames) if frames and speech_frames * 512 / SR > 0.25 else None
 
     def handle(self, audio, via_wake):
+        if self.meeting: return False
         self.set_state('распознаю')
         log('[stt] audio %.1fs' % (len(audio) / SR)); text = self.stt(audio.astype('float32') / 32768)
         if text.strip(): self.ui.say(text.strip(), 'user', hide=3)
@@ -442,7 +455,7 @@ class Widget:
 
     def listen_loop(self):
         while not self.quit:
-            while self.muted and not self.quit: self.check_auto_mute(); time.sleep(0.25)       # no input stream at all while muted
+            while (self.muted or self.meeting) and not self.quit: self.check_auto_mute(); time.sleep(0.25)       # no input stream at all while muted
             try: self.listen_once()
             except Exception:
                 import traceback; log('listen_loop error, retry in 3s', traceback.format_exc()); time.sleep(3)
@@ -459,7 +472,7 @@ class Widget:
         lvl_max, lvl_sum, lvl_n, lvl_t, in_speech, sp_t0, last_part = 0.0, 0.0, 0, time.time(), False, 0.0, ''
         with sd.InputStream(samplerate=SR, channels=1, dtype='int16', blocksize=512, device=dev, callback=cb):
             self.set_state('слушаю')
-            while not self.quit and not self.mic_changed and not self.muted:
+            while not self.quit and not self.mic_changed and not self.muted and not self.meeting:
                 self.check_auto_mute()
                 f = self.frame()
                 if f is None:
@@ -510,7 +523,7 @@ class Widget:
                         log('[wake] recorded', None if a is None else '%.1fs' % (len(a) / SR))
                         if a is not None: self.handle(a, True)
                         else: self.set_state('слушаю')
-        if self.muted:
+        if self.muted or self.meeting:
             while not self.audio.empty(): self.audio.get_nowait()
             self.ring.clear(); self.rec.reset() if hasattr(self, 'rec') and self.rec else None
         log('[mic] stream closed, restarting' if self.mic_changed else '[mic] closed (muted)' if self.muted else '[mic] listen loop ended')
@@ -532,6 +545,71 @@ class Widget:
     def resume_speech(self):
         if not self.paused and not self.redo and self.msgs.empty(): self.msgs.put(('Больше ничего нет.', False, {})); return
         log('[stop] resume'); self.paused = False
+
+    # ---- meeting recording (mic + PC audio -> local transcript; nothing is sent anywhere)
+    def meeting_dir(self):
+        base = self.cfg.get('meeting_dir') or str(Path.home() / 'Documents' / 'voxcrab' / 'meetings')
+        return Path(base) / time.strftime('%Y-%m-%d_%H-%M-%S')
+
+    def toggle_meeting(self):
+        if self.meeting: self.stop_meeting()
+        else: self.start_meeting()
+
+    def start_meeting(self):
+        if self.meeting_busy: self.ui.say('Расшифровка предыдущей записи ещё идёт.', 'say', None, None, 16.0, 4, True); return
+        if self.muted:
+            log('[meeting] refused: do-not-listen mode is on')
+            self.ui.say('Включён режим «Не слушать». Выключи его (Ctrl+Alt+M), потом запись.', 'say', None, None, 16.0, 6, True); return
+        self.meeting = True; self.followup = False; self.ptt = False
+        if self.recording: self.cancel_rec = True
+        self.barge(); self.ui.set_recording(True)
+        threading.Thread(target=self._meeting_start, daemon=True).start()
+
+    def _meeting_start(self):
+        time.sleep(0.7)                       # the listening stream closes first, then the recorder opens the microphone
+        self.meeting_dir_now = self.meeting_dir()
+        rec = meeting.Recorder(self.resolve_mic(), log); rec.start(); self.meeting_rec = rec
+        log('[meeting] recording ->', self.meeting_dir_now, 'loopback', rec.loopback_ok, rec.error)
+        note = 'Идёт запись встречи' + ('' if rec.loopback_ok else ' (только микрофон: ' + (rec.error or 'звук ПК недоступен') + ')')
+        self.ui.say(note + '. Ctrl+Alt+R чтобы закончить.', 'listen', None, None, 16.0, None, True)
+
+    def stop_meeting(self):
+        rec, self.meeting_rec = self.meeting_rec, None
+        if rec is None: return
+        self.ui.set_recording(False); self.meeting_busy = True
+        threading.Thread(target=self._meeting_finish, args=(rec,), daemon=True).start()
+
+    def _meeting_finish(self, rec):
+        folder = self.meeting_dir_now
+        try:
+            started = time.strftime('%Y-%m-%d %H:%M', time.localtime(rec.t0))
+            mic, others, dur = rec.stop(); self.meeting = False       # listening may resume; the transcript runs in the background
+            files = meeting.save_tracks(folder, mic, others); log('[meeting] saved', folder, '%.0fs' % dur)
+            total = len(mic) + len(others); done = {'n': 0}
+            def prog(b): self.ui.say('Расшифровка: %d%%' % min(99, 100 * (done['n'] + b) // max(1, total)), 'say', None, None, 16.0, None, True)
+            me = meeting.transcribe_track(self.stt.segments, mic, prog); done['n'] = len(mic)
+            ot = meeting.transcribe_track(self.stt.segments, others, prog)
+            segs = meeting.merge_segments(me, ot)
+            md = meeting.render_md(segs, started, dur, files + ['transcript.md', 'transcript.txt'])
+            txt = meeting.render_txt(segs)
+            (folder / 'transcript.md').write_text(md, encoding='utf-8'); (folder / 'transcript.txt').write_text(txt, encoding='utf-8')
+            self.last_transcript = txt; log('[meeting] transcript', len(segs), 'segments')
+            self.ui.copy_text(txt)
+            try: os.startfile(str(folder / 'transcript.md'))
+            except Exception as e: log('[meeting] open failed', e)
+            self.ui.say('Расшифровка готова: %s (текст в буфере обмена)' % folder, 'say', None, None, 16.0, 8, True)
+            self.say_event('Расшифровка готова.', False, {'meeting': True})
+        except Exception:
+            import traceback; log('[meeting] failed', traceback.format_exc())
+            self.ui.say('Не удалось сохранить или расшифровать запись, подробности в widget.log.', 'say', None, None, 16.0, 8, True)
+        finally:
+            self.meeting = False; self.meeting_busy = False
+            if self.held: self.flush_held()
+
+    def send_transcript(self):
+        # only on an explicit menu click: hand the last transcript to Claude (never automatic)
+        if not self.last_transcript: self.ui.say('Расшифровки пока нет.', 'say', None, None, 16.0, 4, True); return
+        self.answer_or_send('Вот расшифровка нашей встречи. Сделай краткое резюме, решения и список задач:\n' + self.last_transcript[:20000])
 
     # ---- do not listen (microphone stream is closed, nothing is captured)
     def set_muted(self, on, auto=False):
@@ -591,6 +669,7 @@ class Widget:
         self._hk.append(keyboard.add_hotkey(hk, press))
         if self.cfg['toggle_hotkey']: self._hk.append(keyboard.add_hotkey(self.cfg['toggle_hotkey'], lambda: (log('[hotkey] toggle'), self.ui.toggle())))
         if self.cfg.get('stop_hotkey'): self._hk.append(keyboard.add_hotkey(self.cfg['stop_hotkey'], self.stop_all))
+        if self.cfg.get('meeting_hotkey'): self._hk.append(keyboard.add_hotkey(self.cfg['meeting_hotkey'], lambda: (log('[hotkey] meeting toggle'), self.toggle_meeting())))
         if self.cfg.get('mute_hotkey'): self._hk.append(keyboard.add_hotkey(self.cfg['mute_hotkey'], lambda: (log('[hotkey] mute toggle'), self.toggle_mute())))
         if self.cfg.get('settings_hotkey'): self._hk.append(keyboard.add_hotkey(self.cfg['settings_hotkey'], lambda: self.ui.open_settings()))
         self._hk.append(keyboard.on_release_key(hk.split('+')[-1], lambda e: setattr(self, 'ptt', False)))
@@ -653,6 +732,8 @@ class Widget:
         def quit_(icon, item): self.exit()
         menu = pystray.Menu(
             pystray.MenuItem('Озвучивать по запросу', toggle_mode, checked=on_req),
+            pystray.MenuItem('Запись встречи', lambda i, it: self.toggle_meeting(), checked=lambda i: self.meeting),
+            pystray.MenuItem('Отправить расшифровку Клоду…', lambda i, it: self.send_transcript(), enabled=lambda i: bool(self.last_transcript)),
             pystray.MenuItem('Не слушать', lambda i, it: self.toggle_mute(), checked=lambda i: self.muted),
             pystray.MenuItem('Слово «Клод»', toggle_wake, checked=lambda i: self.cfg['wake_word_enabled']),
             pystray.MenuItem(lambda i: 'Показать Клода' if self.ui.hidden else 'Скрыть Клода', toggle_win, default=True),
@@ -690,6 +771,7 @@ class Widget:
                 km.add_command(label=('● ' if (cur or None) == n else '   ') + (n or 'По умолчанию'), command=lambda n=n: self.set_speaker(n))
             m.add_cascade(label='Динамик', menu=km)
         except Exception as e: log('device menu error', e)
+        m.add_command(label='Остановить запись встречи' if self.meeting else 'Запись встречи', command=self.toggle_meeting)
         m.add_separator(); m.add_command(label='Настройки…', command=lambda: self.ui.open_settings()); m.add_command(label='Выход', command=self.exit)
 
     def set_voice(self, v):
